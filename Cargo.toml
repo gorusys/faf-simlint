@@ -1,0 +1,32 @@
+[package]
+name = "faf-simlint"
+version = "0.1.0"
+edition = "2021"
+authors = ["gorusys <goru.connector@outlook.com>"]
+description = "FAF Unit Weapon Behavior Auditor (Static Analyzer + Micro-Simulator)"
+license = "MIT"
+repository = "https://github.com/gorusys/faf-simlint"
+readme = "README.md"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+axum = { version = "0.7", optional = true }
+tokio = { version = "1", features = ["fs"], optional = true }
+
+[features]
+default = []
+serve = ["axum", "tokio"]
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[[bin]]
+name = "faf-simlint"
+path = "src/main.rs"
