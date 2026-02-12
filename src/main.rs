@@ -5,6 +5,7 @@ use faf_simlint::config::{
     ScanConfig, DEFAULT_CADENCE_GAP_TOLERANCE_SECS, DEFAULT_SIMULATION_SECONDS,
 };
 use faf_simlint::config::{MAX_BLUEPRINT_FILES, MAX_BLUEPRINT_FILE_BYTES};
+use faf_simlint::gamedata;
 use faf_simlint::model::unit_summary_from_file;
 use faf_simlint::report::{write_html_report, write_json_report};
 use faf_simlint::store::Store;
@@ -25,6 +26,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Extract unit blueprints from FAF gamedata folder or gamedata.scd (.zip) into a directory for scanning.
+    Extract {
+        #[arg(long, value_name = "PATH", help = "Path to gamedata folder, gamedata.scd, or FAF install root")]
+        gamedata: PathBuf,
+        #[arg(long, value_name = "DIR", default_value = "extracted_units")]
+        out: PathBuf,
+    },
     /// Scan data directory: parse units/weapons, compute effective DPS, store results and emit reports.
     Scan {
         #[arg(long, value_name = "PATH")]
@@ -60,6 +68,7 @@ fn main() -> Result<(), String> {
     init_logging(cli.verbose);
 
     match cli.command {
+        Commands::Extract { gamedata, out } => run_extract(gamedata, out),
         Commands::Scan {
             data_dir,
             out,
@@ -78,6 +87,13 @@ fn main() -> Result<(), String> {
         } => run_unit(data_dir, scan_db, unit_id_or_name),
         Commands::Diff { a, b, out } => run_diff(a, b, out),
     }
+}
+
+fn run_extract(gamedata: PathBuf, out: PathBuf) -> Result<(), String> {
+    let resolved = gamedata::resolve_gamedata_path(&gamedata);
+    let n = gamedata::extract_gamedata(&resolved, &out)?;
+    tracing::info!("extracted {} unit blueprint(s) to {}", n, out.display());
+    Ok(())
 }
 
 fn run_scan(cfg: ScanConfig) -> Result<(), String> {
@@ -133,7 +149,11 @@ fn collect_lua_files(
         let path = e.path();
         if path.is_dir() {
             collect_lua_files(_root, &path, out)?;
-        } else if path.extension().map(|x| x == "lua").unwrap_or(false) {
+        } else if path
+            .extension()
+            .map(|x| x == "lua" || x == "bp")
+            .unwrap_or(false)
+        {
             out.push(path);
         }
     }

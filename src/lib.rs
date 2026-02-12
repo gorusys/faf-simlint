@@ -5,6 +5,7 @@
 
 pub mod anomaly;
 pub mod config;
+pub mod gamedata;
 pub mod model;
 pub mod parser;
 pub mod report;
