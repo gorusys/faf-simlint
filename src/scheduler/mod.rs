@@ -160,6 +160,10 @@ mod tests {
             salvo_size: None,
             salvo_delay: None,
             reload_time: None,
+            rack_salvo_size: None,
+            rack_salvo_reload_time: None,
+            muzzle_salvo_size: None,
+            muzzle_salvo_delay: None,
             turret_capable: true,
             target_categories: vec!["GROUND".to_string()],
         }];

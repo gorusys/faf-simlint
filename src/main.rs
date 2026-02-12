@@ -10,6 +10,7 @@ use faf_simlint::model::unit_summary_from_file;
 use faf_simlint::report::{write_html_report, write_json_report};
 use faf_simlint::store::Store;
 use faf_simlint::util::{check_file_bounds, init_logging, normalize_id};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -39,6 +40,8 @@ enum Commands {
         data_dir: PathBuf,
         #[arg(long, value_name = "DIR", default_value = "out")]
         out: PathBuf,
+        #[arg(long, value_name = "JSON", help = "Optional: JSON file { \"unit_id\": dps } to use as declared DPS instead of blueprint")]
+        declared_dps: Option<PathBuf>,
         #[arg(long, default_value_t = DEFAULT_SIMULATION_SECONDS)]
         simulation_seconds: f64,
         #[arg(long, default_value_t = DEFAULT_CADENCE_GAP_TOLERANCE_SECS)]
@@ -63,6 +66,21 @@ enum Commands {
     },
 }
 
+/// Load declared DPS override from JSON: { "unit_id": dps_number, ... }
+fn load_declared_dps(path: &PathBuf) -> Result<HashMap<String, f64>, String> {
+    let s = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let raw: HashMap<String, serde_json::Value> = serde_json::from_str(&s).map_err(|e| e.to_string())?;
+    let mut out = HashMap::new();
+    for (id, v) in raw {
+        let dps = match v {
+            serde_json::Value::Number(n) => n.as_f64().unwrap_or(0.0),
+            _ => continue,
+        };
+        out.insert(id.to_lowercase(), dps);
+    }
+    Ok(out)
+}
+
 fn main() -> Result<(), String> {
     let cli = Cli::parse();
     init_logging(cli.verbose);
@@ -72,14 +90,18 @@ fn main() -> Result<(), String> {
         Commands::Scan {
             data_dir,
             out,
+            declared_dps,
             simulation_seconds,
             cadence_gap_tolerance,
-        } => run_scan(ScanConfig {
-            data_dir,
-            out_dir: out,
-            simulation_seconds,
-            cadence_gap_tolerance_secs: cadence_gap_tolerance,
-        }),
+        } => run_scan(
+            ScanConfig {
+                data_dir,
+                out_dir: out,
+                simulation_seconds,
+                cadence_gap_tolerance_secs: cadence_gap_tolerance,
+            },
+            declared_dps,
+        ),
         Commands::Unit {
             data_dir,
             scan_db,
@@ -96,7 +118,7 @@ fn run_extract(gamedata: PathBuf, out: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn run_scan(cfg: ScanConfig) -> Result<(), String> {
+fn run_scan(cfg: ScanConfig, declared_dps_path: Option<PathBuf>) -> Result<(), String> {
     if !cfg.data_dir.is_dir() {
         return Err(format!(
             "data directory does not exist: {}",
@@ -104,6 +126,13 @@ fn run_scan(cfg: ScanConfig) -> Result<(), String> {
         ));
     }
     let data_dir_canon = cfg.data_dir.canonicalize().map_err(|e| e.to_string())?;
+    let declared_dps_map = declared_dps_path
+        .as_ref()
+        .map(|p| load_declared_dps(p))
+        .transpose()?;
+    if declared_dps_map.is_some() {
+        tracing::info!("using declared DPS override from file");
+    }
     let mut lua_files = Vec::new();
     collect_lua_files(&data_dir_canon, &data_dir_canon, &mut lua_files)?;
 
@@ -116,6 +145,7 @@ fn run_scan(cfg: ScanConfig) -> Result<(), String> {
             &content,
             cfg.simulation_seconds,
             cfg.cadence_gap_tolerance_secs,
+            declared_dps_map.as_ref(),
         )? {
             units.push(summary);
         }
@@ -197,6 +227,7 @@ fn run_unit(
                 &content,
                 DEFAULT_SIMULATION_SECONDS,
                 DEFAULT_CADENCE_GAP_TOLERANCE_SECS,
+                None,
             )? {
                 if normalize_id(&summary.unit_id.id) == key
                     || summary

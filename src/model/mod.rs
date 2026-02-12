@@ -16,11 +16,13 @@ pub struct UnitId {
 }
 
 /// Declared weapon stats from blueprint.
+/// FAF engine uses RackSalvoSize/MuzzleSalvoSize/MuzzleSalvoDelay (not ProjectilesPerOnFire, which is deprecated).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeaponDeclared {
     pub weapon_bp_id: String,
     pub damage: f64,
     pub damage_radius: f64,
+    /// Deprecated in FAF; engine uses MuzzleSalvoSize × muzzles. Kept as fallback for nominal DPS when salvo not set.
     pub projectiles_per_fire: u32,
     pub rate_of_fire: f64,
     pub muzzle_velocity: Option<f64>,
@@ -28,6 +30,14 @@ pub struct WeaponDeclared {
     pub salvo_size: Option<u32>,
     pub salvo_delay: Option<f64>,
     pub reload_time: Option<f64>,
+    /// RackSalvoSize: number of rack firings before reload. From FAF blueprint.
+    pub rack_salvo_size: Option<u32>,
+    /// RackSalvoReloadTime (RackSalvoReloadTime). From FAF blueprint.
+    pub rack_salvo_reload_time: Option<f64>,
+    /// MuzzleSalvoSize: shots per rack fire. From FAF blueprint.
+    pub muzzle_salvo_size: Option<u32>,
+    /// MuzzleSalvoDelay: delay between muzzle shots. From FAF blueprint.
+    pub muzzle_salvo_delay: Option<f64>,
     pub turret_capable: bool,
     pub target_categories: Vec<String>,
 }
@@ -60,6 +70,8 @@ pub struct UnitSummary {
     pub weapons: Vec<WeaponDeclared>,
     pub effective: Vec<WeaponEffective>,
     pub anomalies: Vec<crate::anomaly::Anomaly>,
+    /// When set, this is the declared DPS for the unit (e.g. from --declared-dps JSON); used for comparison with sum(effective).
+    pub declared_dps_override: Option<f64>,
 }
 
 /// Compute nominal DPS: (damage * projectiles) * rate, where rate is shots per second.

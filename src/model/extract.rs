@@ -10,15 +10,20 @@ use crate::scheduler;
 use std::path::Path;
 
 /// Extract a single weapon's declared stats from a Lua table (weapon blueprint).
+/// FAF: RackSalvoSize, MuzzleSalvoSize, MuzzleSalvoDelay, RackSalvoReloadTime drive real behavior.
+/// ProjectilesPerOnFire is deprecated in FAF and often wrong (e.g. Salvation 25 vs 36 actual).
 pub fn weapon_from_lua(table: &LuaValue) -> Option<WeaponDeclared> {
     let damage = table.get_num("Damage")?;
     let rate_of_fire = table.get_num("RateOfFire").unwrap_or(1.0);
-    let projectiles = table.get_num("ProjectilesPerOnFire").unwrap_or(1.0) as u32;
     let range = table.get_num("MaxRadius").unwrap_or(0.0);
     let radius = table.get_num("DamageRadius").unwrap_or(0.0);
-    let salvo_size = table.get_num("SalvoSize").map(|n| n as u32);
-    let salvo_delay = table.get_num("SalvoDelay");
-    let reload = table.get_num("ReloadTime");
+    let rack_salvo_size = table.get_num("RackSalvoSize").map(|n| n as u32);
+    let rack_reload = table.get_num("RackSalvoReloadTime");
+    let muzzle_salvo_size = table.get_num("MuzzleSalvoSize").map(|n| n as u32);
+    let muzzle_salvo_delay = table.get_num("MuzzleSalvoDelay");
+    let salvo_size = table.get_num("SalvoSize").map(|n| n as u32).or(muzzle_salvo_size);
+    let salvo_delay = table.get_num("SalvoDelay").or(muzzle_salvo_delay);
+    let reload = table.get_num("ReloadTime").or(rack_reload);
     let muzzle = table.get_num("MuzzleVelocity");
     let turret = table.get_bool("TurretCapable").unwrap_or(false);
     let categories = categories_from_lua(table);
@@ -27,11 +32,16 @@ pub fn weapon_from_lua(table: &LuaValue) -> Option<WeaponDeclared> {
         .or_else(|| table.get_str("weapon_bp_id"))
         .unwrap_or("unknown")
         .to_string();
+    let projectiles = table.get_num("ProjectilesPerOnFire").map(|n| n as u32);
+    let projectiles_per_fire = projectiles
+        .or(muzzle_salvo_size)
+        .unwrap_or(1)
+        .max(1);
     Some(WeaponDeclared {
         weapon_bp_id,
         damage,
         damage_radius: radius,
-        projectiles_per_fire: projectiles.max(1),
+        projectiles_per_fire,
         rate_of_fire: rate_of_fire.max(0.001),
         muzzle_velocity: if muzzle.map(|x| x > 0.0).unwrap_or(false) {
             muzzle
@@ -42,6 +52,10 @@ pub fn weapon_from_lua(table: &LuaValue) -> Option<WeaponDeclared> {
         salvo_size,
         salvo_delay,
         reload_time: reload,
+        rack_salvo_size,
+        rack_salvo_reload_time: rack_reload,
+        muzzle_salvo_size,
+        muzzle_salvo_delay,
         turret_capable: turret,
         target_categories: categories,
     })
@@ -107,12 +121,14 @@ pub fn weapons_from_unit_lua(root: &LuaValue) -> Vec<WeaponDeclared> {
 }
 
 /// Build effective stats and anomalies for one unit.
+/// When declared_dps_override is Some, it is used for unit-level declared vs effective comparison instead of per-weapon nominal.
 pub fn build_unit_summary(
     unit_id: UnitId,
     blueprint_path: String,
     weapons: Vec<WeaponDeclared>,
     simulation_sec: f64,
     gap_tolerance_sec: f64,
+    declared_dps_override: Option<f64>,
 ) -> UnitSummary {
     let mut effective = Vec::with_capacity(weapons.len());
     let mut anomalies = Vec::new();
@@ -150,12 +166,26 @@ pub fn build_unit_summary(
             target_class_modifiers,
         });
 
-        if (nominal - eff_dps).abs() > 0.01 * nominal.max(1.0) {
+        if declared_dps_override.is_none()
+            && (nominal - eff_dps).abs() > 0.01 * nominal.max(1.0)
+        {
             anomalies.push(Anomaly::declared_vs_effective_mismatch(
                 &unit_id.id,
                 &w.weapon_bp_id,
                 nominal,
                 eff_dps,
+            ));
+        }
+    }
+
+    if let Some(declared) = declared_dps_override {
+        let total_effective: f64 = effective.iter().map(|e| e.effective_dps).sum();
+        if (declared - total_effective).abs() > 0.01 * declared.max(1.0) {
+            anomalies.push(Anomaly::declared_vs_effective_mismatch(
+                &unit_id.id,
+                "(unit total)",
+                declared,
+                total_effective,
             ));
         }
     }
@@ -202,15 +232,18 @@ pub fn build_unit_summary(
         weapons,
         effective,
         anomalies,
+        declared_dps_override,
     }
 }
 
 /// Try to parse file and extract one unit summary (if file looks like a unit blueprint).
+/// declared_dps_overrides: when provided, map unit_id (lowercase) -> declared DPS; used for unit-level comparison.
 pub fn unit_summary_from_file(
     path: &Path,
     content: &str,
     simulation_sec: f64,
     gap_tolerance_sec: f64,
+    declared_dps_overrides: Option<&std::collections::HashMap<String, f64>>,
 ) -> Result<Option<UnitSummary>, String> {
     let root = crate::parser::parse_blueprint(content).map_err(|e| e.to_string())?;
     let unit_id = match unit_id_from_lua(&root) {
@@ -220,6 +253,10 @@ pub fn unit_summary_from_file(
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
+                .to_string();
+            let id = id
+                .strip_suffix("_unit")
+                .unwrap_or(&id)
                 .to_string();
             UnitId {
                 id: id.clone(),
@@ -231,6 +268,8 @@ pub fn unit_summary_from_file(
     if weapons.is_empty() {
         return Ok(None);
     }
+    let declared_override = declared_dps_overrides
+        .and_then(|m| m.get(&unit_id.id.to_lowercase()).copied());
     let blueprint_path = path.to_string_lossy().to_string();
     Ok(Some(build_unit_summary(
         unit_id,
@@ -238,5 +277,6 @@ pub fn unit_summary_from_file(
         weapons,
         simulation_sec,
         gap_tolerance_sec,
+        declared_override,
     )))
 }

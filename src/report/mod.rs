@@ -138,6 +138,10 @@ fn render_unit_page(u: &UnitSummary) -> String {
             )
         })
         .collect();
+    let declared_override_note = u
+        .declared_dps_override
+        .map(|d| format!("<p>Declared DPS (from override): {:.2}</p>", d))
+        .unwrap_or_default();
     let anomaly_list: String = u
         .anomalies
         .iter()
@@ -158,7 +162,8 @@ fn render_unit_page(u: &UnitSummary) -> String {
 <body>
 <h1>{}</h1>
 <p><a href="index.html">Back to list</a></p>
-<h2>Declared weapon stats</h2>
+{}
+<h2>Declared weapon stats (blueprint)</h2>
 <table><thead><tr><th>Weapon</th><th>Damage</th><th>Projectiles</th><th>ROF</th></tr></thead><tbody>{}</tbody></table>
 <h2>Effective (computed)</h2>
 <table><thead><tr><th>Weapon</th><th>Nominal DPS</th><th>Effective DPS</th><th>Cycle (s)</th></tr></thead><tbody>{}</tbody></table>
@@ -168,6 +173,7 @@ fn render_unit_page(u: &UnitSummary) -> String {
 </html>"#,
         html_escape(name),
         html_escape(name),
+        declared_override_note,
         declared_rows,
         effective_rows,
         if anomaly_list.is_empty() {
@@ -209,6 +215,10 @@ mod tests {
                 salvo_size: None,
                 salvo_delay: None,
                 reload_time: None,
+                rack_salvo_size: None,
+                rack_salvo_reload_time: None,
+                muzzle_salvo_size: None,
+                muzzle_salvo_delay: None,
                 turret_capable: true,
                 target_categories: vec![],
             }],
@@ -223,6 +233,7 @@ mod tests {
                 target_class_modifiers: vec![],
             }],
             anomalies: vec![],
+            declared_dps_override: None,
         }];
         let dir = tempfile::tempdir().unwrap();
         write_html_report(&units, dir.path()).unwrap();
