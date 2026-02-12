@@ -207,6 +207,10 @@ mod tests {
             weapons: vec![WeaponDeclared {
                 weapon_bp_id: "W1".to_string(),
                 damage: 10.0,
+                initial_damage: None,
+                projectile_id: None,
+                fragment_count: None,
+                fragment_damage: None,
                 damage_radius: 0.0,
                 projectiles_per_fire: 1,
                 rate_of_fire: 2.0,

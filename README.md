@@ -43,6 +43,25 @@ Run `extract` to pull all `*_unit.bp` files from your FAF gamedata in one go:
 
 You can also point `scan --data-dir` at any directory that already contains unit blueprint Lua/`.bp` files (e.g. from a mod).
 
+**Real FAF / fa project layout:**  
+To get correct data (including **fragmented weapons** like T1 Seraphim arty or Salvation), the tool must scan both the **units** folder and the **projectiles** folder. Weapon blueprint damage does not include fragments or DoT; the only reliable way to get actual fragment count is from projectiles data.
+
+- Point `--data-dir` at the **repo root** (e.g. `/path/to/fa`): the tool will scan `units/` and `projectiles/` automatically.
+- Or point at `units/` only: then projectiles are not loaded (fragment count will be missing for fragmentation weapons).
+- `*_script.lua` files are never parsed (they are behavior scripts, not blueprints); parsing them would cause “trailing content” errors.
+
+```bash
+# Recommended: scan repo root so both units and projectiles are loaded (fragment data)
+./target/release/faf-simlint scan --data-dir /path/to/fa --out out
+
+# Or scan only units (no fragment data from projectiles)
+./target/release/faf-simlint scan --data-dir /path/to/fa/units --out out
+
+# Extract only pulls unit blueprints; use scan on repo root for full fragment data
+./target/release/faf-simlint extract --gamedata /path/to/fa --out extracted_units
+./target/release/faf-simlint scan --data-dir extracted_units --out out
+```
+
 ## Quickstart
 
 ```bash
@@ -69,8 +88,8 @@ cargo build --release
 
 ## Effective DPS vs declared
 
-- **Declared / nominal:** From the blueprint (or from an override file, see below). Note: **ProjectilesPerOnFire is deprecated** in FAF and is not used by the real engine; the game uses **RackSalvoSize**, **MuzzleSalvoSize**, **MuzzleSalvoDelay**, and **RackSalvoReloadTime**. So blueprint “declared” may not match in-game (e.g. Salvation shows 25 but shoots 36; Hunter fires 1 projectile 3 ticks in a row). The tool reads Rack/Muzzle salvo when present and falls back to legacy fields.
-- **Effective:** Computed from rate, salvo, and reload. This is what the micro-simulator and reports use for comparisons.
+- **Declared / nominal:** From the blueprint (or from an override file, see below). Note: **ProjectilesPerOnFire is deprecated** in FAF; the game uses **RackSalvoSize**, **MuzzleSalvoSize**, **MuzzleSalvoDelay**, and **RackSalvoReloadTime**. **Weapon Damage does not include fragments or DoT**; the tool adds **InitialDamage** (e.g. UEF T1 bomber) and fragment damage from **projectiles** data when available (scan with `--data-dir` pointing at repo root so both `units/` and `projectiles/` are loaded).
+- **Effective:** Computed from total damage per shot (weapon Damage + InitialDamage + fragment count × fragment damage), rate, salvo, and reload.
 
 **Import your own declared DPS:**  
 To compare against wiki/balance/measured values instead of blueprint-derived nominal, use a JSON file:

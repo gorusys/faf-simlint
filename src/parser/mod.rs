@@ -8,11 +8,29 @@ use crate::config::MAX_BLUEPRINT_FILE_BYTES;
 use std::str::FromStr;
 
 /// Parse blueprint content into a Lua table (root). Fails on syntax error or oversized input.
+/// Real FAF unit files use `UnitBlueprint{ ... }`; we strip the prefix and parse the inner table.
 pub fn parse_blueprint(content: &str) -> Result<LuaValue, ParseError> {
     if content.len() > MAX_BLUEPRINT_FILE_BYTES {
         return Err(ParseError::InputTooLarge);
     }
-    let mut p = Parser::new(content);
+    let trimmed = content.trim_start();
+    // Real FAF: UnitBlueprint{ ... } or MeshBlueprint{ ... } etc. Strip "FooBlueprint" and parse from first `{`.
+    let start = if let Some(open) = trimmed.find('{') {
+        if open == 0 {
+            0
+        } else {
+            let prefix = trimmed.get(..open).unwrap_or("").trim_end();
+            if prefix.ends_with("Blueprint") && prefix.chars().all(|c| c.is_ascii_alphabetic() || c == '_') {
+                open
+            } else {
+                0
+            }
+        }
+    } else {
+        0
+    };
+    let slice = if start > 0 { &trimmed[start..] } else { trimmed };
+    let mut p = Parser::new(slice);
     p.parse_value().and_then(|v| {
         p.skip_whitespace_and_comments();
         if p.rest().trim().is_empty() {
@@ -126,7 +144,7 @@ impl<'a> Parser<'a> {
         } else if c.is_ascii_digit() || c == '-' || c == '+' || c == '.' {
             self.parse_number()
         } else if c.is_ascii_alphabetic() || c == '_' {
-            self.parse_identifier()
+            self.parse_identifier_or_call_table()
         } else {
             Err(ParseError::UnexpectedChar(c))
         }
@@ -151,6 +169,17 @@ impl<'a> Parser<'a> {
         let ident = self.s[start..end].to_string();
         self.pos = end;
         Ok(LuaValue::String(ident))
+    }
+
+    /// Parse identifier; if followed by `{`, parse the table and return it (real FAF uses e.g. Sound { ... }).
+    fn parse_identifier_or_call_table(&mut self) -> Result<LuaValue, ParseError> {
+        let val = self.parse_identifier()?;
+        self.skip_whitespace_and_comments();
+        if self.rest().starts_with('{') {
+            self.parse_table()
+        } else {
+            Ok(val)
+        }
     }
 
     fn parse_table(&mut self) -> Result<LuaValue, ParseError> {
@@ -255,7 +284,10 @@ impl<'a> Parser<'a> {
             let rest = self.rest();
             if rest.starts_with(',') || rest.starts_with(';') {
                 self.pos += 1;
-            } else if !rest.starts_with('}') {
+            } else if rest.starts_with('}') {
+                self.pos += 1;
+                break;
+            } else {
                 self.depth -= 1;
                 return Err(ParseError::UnexpectedChar(
                     rest.chars().next().unwrap_or(' '),
@@ -330,7 +362,18 @@ impl<'a> Parser<'a> {
         let n: f64 =
             f64::from_str(slice).map_err(|_| ParseError::InvalidNumber { at: start_pos })?;
         self.pos = end;
-        Ok(LuaValue::Number(n))
+        // Real FAF uses RateOfFire = 10/20 (ticks); parse optional / <number> as division
+        self.skip_whitespace_and_comments();
+        let rest = self.rest().trim_start();
+        if rest.starts_with('/') {
+            self.pos += self.rest().len() - rest.len() + 1;
+            self.skip_whitespace_and_comments();
+            let second = self.parse_number()?;
+            let denom = second.as_number().unwrap_or(1.0);
+            Ok(LuaValue::Number(if denom != 0.0 { n / denom } else { n }))
+        } else {
+            Ok(LuaValue::Number(n))
+        }
     }
 }
 

@@ -1,19 +1,49 @@
 //! Extract unit and weapon data from parsed blueprint LuaValue.
 
 use super::{
-    cycle_time_sec, effective_dps, nominal_dps, salvo_duration_sec, TargetClassDps, UnitId,
-    UnitSummary, WeaponDeclared, WeaponEffective,
+    cycle_time_sec, effective_dps, nominal_dps, normalize_projectile_path, salvo_duration_sec,
+    total_damage_per_shot, ProjectileData, TargetClassDps, UnitId, UnitSummary, WeaponDeclared,
+    WeaponEffective,
 };
 use crate::anomaly::Anomaly;
 use crate::parser::LuaValue;
 use crate::scheduler;
+use std::collections::HashMap;
 use std::path::Path;
+
+/// Enrich weapons with fragment count (and optionally fragment damage) from projectile map.
+/// The only reliable way to get actual fragment count is from projectiles data.
+pub fn enrich_weapons_from_projectiles(
+    weapons: &mut [WeaponDeclared],
+    map: &HashMap<String, ProjectileData>,
+) {
+    for w in weapons.iter_mut() {
+        let Some(ref proj_id) = w.projectile_id else { continue };
+        let key = normalize_projectile_path(proj_id);
+        let Some(proj) = map.get(&key) else { continue };
+        if let Some(n) = proj.fragment_count {
+            w.fragment_count = Some(n);
+        }
+        if let Some(ref frag_id) = proj.fragment_id {
+            let frag_key = normalize_projectile_path(frag_id);
+            if let Some(frag_proj) = map.get(&frag_key) {
+                if let Some(d) = frag_proj.damage {
+                    w.fragment_damage = Some(d);
+                }
+            }
+        }
+    }
+}
 
 /// Extract a single weapon's declared stats from a Lua table (weapon blueprint).
 /// FAF: RackSalvoSize, MuzzleSalvoSize, MuzzleSalvoDelay, RackSalvoReloadTime drive real behavior.
-/// ProjectilesPerOnFire is deprecated in FAF and often wrong (e.g. Salvation 25 vs 36 actual).
+/// ProjectilesPerOnFire is deprecated; fragment count comes from projectiles data. Damage does not include fragments or DoT.
 pub fn weapon_from_lua(table: &LuaValue) -> Option<WeaponDeclared> {
-    let damage = table.get_num("Damage")?;
+    let damage = table.get_num("Damage").unwrap_or(0.0);
+    let initial_damage = table.get_num("InitialDamage");
+    let projectile_id = table
+        .get_str("ProjectileId")
+        .map(|s| s.trim_matches('"').to_string());
     let rate_of_fire = table.get_num("RateOfFire").unwrap_or(1.0);
     let range = table.get_num("MaxRadius").unwrap_or(0.0);
     let radius = table.get_num("DamageRadius").unwrap_or(0.0);
@@ -40,6 +70,10 @@ pub fn weapon_from_lua(table: &LuaValue) -> Option<WeaponDeclared> {
     Some(WeaponDeclared {
         weapon_bp_id,
         damage,
+        initial_damage,
+        projectile_id,
+        fragment_count: None,
+        fragment_damage: None,
         damage_radius: radius,
         projectiles_per_fire,
         rate_of_fire: rate_of_fire.max(0.001),
@@ -134,11 +168,12 @@ pub fn build_unit_summary(
     let mut anomalies = Vec::new();
 
     for w in &weapons {
-        let nominal = nominal_dps(w.damage, w.projectiles_per_fire, w.rate_of_fire);
+        let damage = total_damage_per_shot(w);
+        let nominal = nominal_dps(damage, w.projectiles_per_fire, w.rate_of_fire);
         let cycle = cycle_time_sec(w.rate_of_fire, w.reload_time);
         let salvo_dur = salvo_duration_sec(w.salvo_size, w.salvo_delay);
         let eff_dps = effective_dps(
-            w.damage,
+            damage,
             w.projectiles_per_fire,
             w.rate_of_fire,
             w.reload_time,
@@ -238,14 +273,17 @@ pub fn build_unit_summary(
 
 /// Try to parse file and extract one unit summary (if file looks like a unit blueprint).
 /// declared_dps_overrides: when provided, map unit_id (lowercase) -> declared DPS; used for unit-level comparison.
+/// projectile_map: when provided, weapons are enriched with fragment count/damage from projectiles data.
 pub fn unit_summary_from_file(
     path: &Path,
     content: &str,
     simulation_sec: f64,
     gap_tolerance_sec: f64,
     declared_dps_overrides: Option<&std::collections::HashMap<String, f64>>,
+    projectile_map: Option<&HashMap<String, ProjectileData>>,
 ) -> Result<Option<UnitSummary>, String> {
-    let root = crate::parser::parse_blueprint(content).map_err(|e| e.to_string())?;
+    let root = crate::parser::parse_blueprint(content)
+        .map_err(|e| format!("{}: {}", path.display(), e))?;
     let unit_id = match unit_id_from_lua(&root) {
         Some(id) => id,
         None => {
@@ -264,9 +302,12 @@ pub fn unit_summary_from_file(
             }
         }
     };
-    let weapons = weapons_from_unit_lua(&root);
+    let mut weapons = weapons_from_unit_lua(&root);
     if weapons.is_empty() {
         return Ok(None);
+    }
+    if let Some(map) = projectile_map {
+        enrich_weapons_from_projectiles(&mut weapons, map);
     }
     let declared_override = declared_dps_overrides
         .and_then(|m| m.get(&unit_id.id.to_lowercase()).copied());

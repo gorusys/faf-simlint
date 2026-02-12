@@ -6,13 +6,15 @@ use faf_simlint::config::{
 };
 use faf_simlint::config::{MAX_BLUEPRINT_FILES, MAX_BLUEPRINT_FILE_BYTES};
 use faf_simlint::gamedata;
-use faf_simlint::model::unit_summary_from_file;
+use faf_simlint::model::{
+    normalize_projectile_path, projectile_from_lua, unit_summary_from_file, ProjectileData,
+};
 use faf_simlint::report::{write_html_report, write_json_report};
 use faf_simlint::store::Store;
 use faf_simlint::util::{check_file_bounds, init_logging, normalize_id};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "faf-simlint")]
@@ -118,6 +120,66 @@ fn run_extract(gamedata: PathBuf, out: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve units root and projectiles root: if data_dir is FAF root (has units/ and projectiles/) use those;
+/// if data_dir ends with "units", use it for units and sibling "projectiles" for projectiles.
+fn resolve_scan_dirs(data_dir: &Path) -> (PathBuf, Option<PathBuf>) {
+    let data_dir = data_dir.canonicalize().unwrap_or_else(|_| data_dir.to_path_buf());
+    let units_sub = data_dir.join("units");
+    let projectiles_sub = data_dir.join("projectiles");
+    if units_sub.is_dir() {
+        let proj = if projectiles_sub.is_dir() {
+            Some(projectiles_sub)
+        } else {
+            None
+        };
+        return (units_sub, proj);
+    }
+    if data_dir.file_name().map(|n| n == "units").unwrap_or(false) {
+        if let Some(parent) = data_dir.parent() {
+            let sibling_proj = parent.join("projectiles");
+            if sibling_proj.is_dir() {
+                return (data_dir.to_path_buf(), Some(sibling_proj));
+            }
+        }
+    }
+    (data_dir, None)
+}
+
+fn collect_projectile_files(
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    if out.len() >= MAX_BLUEPRINT_FILES {
+        return Ok(());
+    }
+    let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for e in entries {
+        let e = e.map_err(|e| e.to_string())?;
+        let path = e.path();
+        if path.is_dir() {
+            collect_projectile_files(&path, out)?;
+        } else if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.ends_with("_proj.bp"))
+            .unwrap_or(false)
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Build projectile path key from file path: e.g. .../projectiles/XXX/XXX_proj.bp -> projectiles/xxx/xxx_proj.bp
+fn projectile_file_to_key(path: &Path) -> String {
+    let s = path.to_string_lossy().replace('\\', "/");
+    if let Some(i) = s.to_lowercase().find("projectiles/") {
+        s[i..].to_lowercase()
+    } else {
+        s.to_lowercase()
+    }
+}
+
 fn run_scan(cfg: ScanConfig, declared_dps_path: Option<PathBuf>) -> Result<(), String> {
     if !cfg.data_dir.is_dir() {
         return Err(format!(
@@ -126,6 +188,7 @@ fn run_scan(cfg: ScanConfig, declared_dps_path: Option<PathBuf>) -> Result<(), S
         ));
     }
     let data_dir_canon = cfg.data_dir.canonicalize().map_err(|e| e.to_string())?;
+    let (units_root, projectiles_root) = resolve_scan_dirs(&data_dir_canon);
     let declared_dps_map = declared_dps_path
         .as_ref()
         .map(|p| load_declared_dps(p))
@@ -133,19 +196,49 @@ fn run_scan(cfg: ScanConfig, declared_dps_path: Option<PathBuf>) -> Result<(), S
     if declared_dps_map.is_some() {
         tracing::info!("using declared DPS override from file");
     }
-    let mut lua_files = Vec::new();
-    collect_lua_files(&data_dir_canon, &data_dir_canon, &mut lua_files)?;
+
+    let mut unit_files = Vec::new();
+    collect_lua_files(&units_root, &units_root, &mut unit_files)?;
+
+    let mut projectile_map = HashMap::<String, ProjectileData>::new();
+    if let Some(ref proj_dir) = projectiles_root {
+        let mut proj_files = Vec::new();
+        collect_projectile_files(proj_dir, &mut proj_files)?;
+        tracing::info!("loaded {} projectile blueprint(s) for fragment data", proj_files.len());
+        for path in &proj_files {
+            let content = match fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if content.len() > MAX_BLUEPRINT_FILE_BYTES {
+                continue;
+            }
+            let root = match faf_simlint::parser::parse_blueprint(&content) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let key = normalize_projectile_path(&projectile_file_to_key(path));
+            let data = projectile_from_lua(&root).unwrap_or_default();
+            projectile_map.insert(key, data);
+        }
+    }
 
     let mut units = Vec::new();
-    for path in &lua_files {
+    let projectile_map_ref = if projectile_map.is_empty() {
+        None
+    } else {
+        Some(&projectile_map)
+    };
+    for path in &unit_files {
         let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        check_file_bounds(path, &data_dir_canon, MAX_BLUEPRINT_FILE_BYTES)?;
+        check_file_bounds(path, &units_root, MAX_BLUEPRINT_FILE_BYTES)?;
         if let Some(summary) = unit_summary_from_file(
             path,
             &content,
             cfg.simulation_seconds,
             cfg.cadence_gap_tolerance_secs,
             declared_dps_map.as_ref(),
+            projectile_map_ref,
         )? {
             units.push(summary);
         }
@@ -179,12 +272,22 @@ fn collect_lua_files(
         let path = e.path();
         if path.is_dir() {
             collect_lua_files(_root, &path, out)?;
-        } else if path
-            .extension()
-            .map(|x| x == "lua" || x == "bp")
-            .unwrap_or(false)
-        {
-            out.push(path);
+        } else if path.extension().map(|x| x == "lua").unwrap_or(false) {
+            // Skip FAF script files (behavior Lua), only parse blueprint-style .lua (e.g. fixtures)
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !name.ends_with("_script.lua") && !name.ends_with("_Script.lua") {
+                out.push(path);
+            }
+        } else if path.extension().map(|x| x == "bp").unwrap_or(false) {
+            // Real FAF layout: units/<ID>/<ID>_unit.bp; only scan unit blueprints, skip _mesh.bp etc.
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with("_unit.bp"))
+                .unwrap_or(false)
+            {
+                out.push(path);
+            }
         }
     }
     Ok(())
@@ -218,8 +321,26 @@ fn run_unit(
     }
     if let Some(dir) = data_dir {
         let dir_canon = dir.canonicalize().map_err(|e| e.to_string())?;
+        let (units_root, projectiles_root) = resolve_scan_dirs(&dir_canon);
         let mut lua_files = Vec::new();
-        collect_lua_files(&dir_canon, &dir_canon, &mut lua_files)?;
+        collect_lua_files(&units_root, &units_root, &mut lua_files)?;
+        let mut projectile_map = HashMap::<String, ProjectileData>::new();
+        if let Some(ref proj_dir) = projectiles_root {
+            let mut proj_files = Vec::new();
+            let _ = collect_projectile_files(proj_dir, &mut proj_files);
+            for path in &proj_files {
+                if let Ok(content) = fs::read_to_string(path) {
+                    if content.len() <= MAX_BLUEPRINT_FILE_BYTES {
+                        if let Ok(root) = faf_simlint::parser::parse_blueprint(&content) {
+                            let key = normalize_projectile_path(&projectile_file_to_key(path));
+                            let data = projectile_from_lua(&root).unwrap_or_default();
+                            projectile_map.insert(key, data);
+                        }
+                    }
+                }
+            }
+        }
+        let projectile_map_ref = if projectile_map.is_empty() { None } else { Some(&projectile_map) };
         for path in &lua_files {
             let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
             if let Some(summary) = unit_summary_from_file(
@@ -228,6 +349,7 @@ fn run_unit(
                 DEFAULT_SIMULATION_SECONDS,
                 DEFAULT_CADENCE_GAP_TOLERANCE_SECS,
                 None,
+                projectile_map_ref,
             )? {
                 if normalize_id(&summary.unit_id.id) == key
                     || summary

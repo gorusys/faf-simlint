@@ -1,11 +1,13 @@
 //! Weapon and unit model: DPS, cadence, salvo, target class.
 
 mod extract;
+mod projectile;
 
 pub use extract::{
     build_unit_summary, unit_id_from_lua, unit_summary_from_file, weapon_from_lua,
     weapons_from_unit_lua,
 };
+pub use projectile::{normalize_projectile_path, projectile_from_lua, ProjectileData};
 use serde::{Deserialize, Serialize};
 
 /// Identifies a unit blueprint (ID or name).
@@ -17,10 +19,20 @@ pub struct UnitId {
 
 /// Declared weapon stats from blueprint.
 /// FAF engine uses RackSalvoSize/MuzzleSalvoSize/MuzzleSalvoDelay (not ProjectilesPerOnFire, which is deprecated).
+/// Weapon Damage does not include fragments or DoT; fragment count/damage come from projectiles data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeaponDeclared {
     pub weapon_bp_id: String,
+    /// Direct hit damage from weapon blueprint.
     pub damage: f64,
+    /// Extra damage on impact (e.g. UEF T1 bomber); not included in Damage.
+    pub initial_damage: Option<f64>,
+    /// Projectile path from blueprint (e.g. "/projectiles/.../..._proj.bp"); used to resolve fragment data.
+    pub projectile_id: Option<String>,
+    /// Fragment count from projectile blueprint (reliable source; weapon blueprint does not include fragments).
+    pub fragment_count: Option<u32>,
+    /// Damage per fragment from fragment projectile; total fragment damage = fragment_count * fragment_damage.
+    pub fragment_damage: Option<f64>,
     pub damage_radius: f64,
     /// Deprecated in FAF; engine uses MuzzleSalvoSize × muzzles. Kept as fallback for nominal DPS when salvo not set.
     pub projectiles_per_fire: u32,
@@ -74,7 +86,17 @@ pub struct UnitSummary {
     pub declared_dps_override: Option<f64>,
 }
 
-/// Compute nominal DPS: (damage * projectiles) * rate, where rate is shots per second.
+/// Total damage per shot: weapon Damage + InitialDamage + (fragment_count * fragment_damage). Weapon blueprint damage does not include fragments or DoT.
+pub fn total_damage_per_shot(w: &WeaponDeclared) -> f64 {
+    let base = w.damage + w.initial_damage.unwrap_or(0.0);
+    let frag = w
+        .fragment_count
+        .unwrap_or(0) as f64
+        * w.fragment_damage.unwrap_or(0.0);
+    base + frag
+}
+
+/// Compute nominal DPS: (total_damage_per_shot * projectiles) * rate, where rate is shots per second.
 pub fn nominal_dps(damage: f64, projectiles: u32, rate_of_fire: f64) -> f64 {
     if rate_of_fire <= 0.0 {
         return 0.0;
