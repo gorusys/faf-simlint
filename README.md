@@ -25,14 +25,23 @@ faf-simlint helps by:
 
 ## Getting FAF data
 
-Use a **local path** to your FAF installation’s blueprint/weapon data (e.g. after extracting game archives or from a mod). The tool does not fetch data; you point it at a directory.
+Use a **local path** to your FAF installation’s blueprint/weapon data. The tool does not fetch data; you point it at a directory or archive.
 
-Typical locations (you may need to extract from `.zip`/game files):
+**Extract from gamedata (recommended):**  
+Run `extract` to pull all `*_unit.bp` files from your FAF gamedata in one go:
 
-- FAF game data: e.g. `gamedata/` or similar under your FAF install
-- Mods: mod-specific unit/weapon Lua under the mod’s folder
+```bash
+# From gamedata folder, gamedata.scd (.zip), or FAF install root
+./target/release/faf-simlint extract --gamedata /path/to/gamedata --out extracted_units
+# Then scan the extracted folder
+./target/release/faf-simlint scan --data-dir extracted_units --out out
+```
 
-Provide this path via `--data-dir` for `scan` and `unit` (when not using a prior scan DB).
+- **gamedata folder:** expects `gamedata/units/` (or pass the `units` folder directly).
+- **gamedata.scd / .zip:** reads the archive and extracts every `*_unit.bp` into `--out`.
+- **FAF install root:** if you pass the install root, the command looks for `gamedata/` or `gamedata.scd` inside it.
+
+You can also point `scan --data-dir` at any directory that already contains unit blueprint Lua/`.bp` files (e.g. from a mod).
 
 ## Quickstart
 
@@ -40,25 +49,37 @@ Provide this path via `--data-dir` for `scan` and `unit` (when not using a prior
 # Build
 cargo build --release
 
-# Scan a directory of unit/weapon Lua; writes SQLite + JSON + HTML under out/
-./target/release/faf-simlint scan --data-dir /path/to/faf/units --out out
+# 1) Extract unit blueprints from gamedata (optional)
+./target/release/faf-simlint extract --gamedata /path/to/faf/gamedata --out extracted_units
 
-# Summarize one unit (from last scan in the DB)
+# 2) Scan; writes SQLite + JSON + HTML under out/
+./target/release/faf-simlint scan --data-dir extracted_units --out out
+# Or with declared DPS overrides (see below):
+./target/release/faf-simlint scan --data-dir extracted_units --out out --declared-dps declared.json
+
+# 3) Summarize one unit (from last scan in the DB)
 ./target/release/faf-simlint unit --scan-db out/scan.sqlite uel0101
 
 # Or from data dir only (no prior scan)
-./target/release/faf-simlint unit --data-dir /path/to/faf/units uel0101
+./target/release/faf-simlint unit --data-dir extracted_units uel0101
 
-# Compare two scans (e.g. before/after a patch)
+# 4) Compare two scans (e.g. before/after a patch)
 ./target/release/faf-simlint diff --a out1/scan.sqlite --b out2/scan.sqlite --out diff_out
 ```
 
 ## Effective DPS vs declared
 
-- **Declared / nominal:** Often “damage × projectiles / rate” or what the blueprint states.
-- **Effective:** Accounts for reload, salvo timing, and (when modeled) target class. Effective DPS is what the micro-simulator and reports use for comparisons and regressions.
+- **Declared / nominal:** From the blueprint (or from an override file, see below). Note: **ProjectilesPerOnFire is deprecated** in FAF and is not used by the real engine; the game uses **RackSalvoSize**, **MuzzleSalvoSize**, **MuzzleSalvoDelay**, and **RackSalvoReloadTime**. So blueprint “declared” may not match in-game (e.g. Salvation shows 25 but shoots 36; Hunter fires 1 projectile 3 ticks in a row). The tool reads Rack/Muzzle salvo when present and falls back to legacy fields.
+- **Effective:** Computed from rate, salvo, and reload. This is what the micro-simulator and reports use for comparisons.
 
-If effective DPS is much lower than nominal, the report will flag it and explain (e.g. salvo/cooldown pattern).
+**Import your own declared DPS:**  
+To compare against wiki/balance/measured values instead of blueprint-derived nominal, use a JSON file:
+
+```bash
+./target/release/faf-simlint scan --data-dir extracted_units --out out --declared-dps declared.json
+```
+
+Format: `{ "unit_id": dps_number, ... }` (e.g. `{ "uel0101": 20.5, "ual0107": 12 }`). Unit IDs are matched case-insensitively. The report then shows “Declared DPS (from override)” and compares it to the sum of effective weapon DPS for that unit.
 
 ## Sharing the HTML report
 
@@ -69,8 +90,9 @@ If effective DPS is much lower than nominal, the report will flag it and explain
 
 ## Adding more parsers / fixtures
 
-- **Fixtures:** Add Lua files under `fixtures/units` or `fixtures/weapons`; they are used by tests and as examples.
-- **Parsers:** The parser lives in `src/parser` (Lua-like tables, strings, numbers, booleans; no execution). Extend field names in `src/model/extract.rs` (e.g. `BlueprintId`, `Damage`, `RateOfFire`) to match more FAF formats.
+- **Fixtures:** Add Lua or `.bp` files under `fixtures/units` or `fixtures/weapons`; they are used by tests and as examples.
+- **Declared DPS:** Use `fixtures/declared_dps_example.json` as a template for `--declared-dps` (unit ID → DPS map).
+- **Parsers:** The parser lives in `src/parser` (Lua-like tables, strings, numbers, booleans; no execution). Weapon fields are in `src/model/extract.rs`: FAF uses `RackSalvoSize`, `MuzzleSalvoSize`, `MuzzleSalvoDelay`, `RackSalvoReloadTime`; legacy `ProjectilesPerOnFire` is deprecated and only used as fallback when salvo fields are missing.
 
 ## License
 
