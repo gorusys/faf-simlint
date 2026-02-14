@@ -86,7 +86,7 @@ fn extract_from_zip(zip_path: &Path, out_dir: &Path, count: &mut usize) -> Resul
 }
 
 fn collect_and_copy_bps(
-    root: &Path,
+    _root: &Path,
     dir: &Path,
     out_dir: &Path,
     count: &mut usize,
@@ -99,7 +99,7 @@ fn collect_and_copy_bps(
         let e = e.map_err(|e| e.to_string())?;
         let path = e.path();
         if path.is_dir() {
-            collect_and_copy_bps(root, &path, out_dir, count)?;
+            collect_and_copy_bps(_root, &path, out_dir, count)?;
         } else if path
             .file_name()
             .and_then(|n| n.to_str())

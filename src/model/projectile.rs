@@ -18,12 +18,11 @@ pub struct ProjectileData {
 pub fn normalize_projectile_path(path: &str) -> String {
     let s = path.trim().trim_matches('"').to_string();
     let s = s.replace('\\', "/");
-    if s.to_lowercase().starts_with("/projectiles/") {
-        s[1..].to_lowercase()
-    } else if s.to_lowercase().starts_with("projectiles/") {
-        s.to_lowercase()
+    let s = s.to_lowercase();
+    if s.starts_with("/projectiles/") {
+        s[1..].to_string()
     } else {
-        s.to_lowercase()
+        s
     }
 }
 

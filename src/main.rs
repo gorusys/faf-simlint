@@ -199,7 +199,7 @@ fn run_scan(cfg: ScanConfig, declared_dps_path: Option<PathBuf>) -> Result<(), S
     let (units_root, projectiles_root) = resolve_scan_dirs(&data_dir_canon);
     let declared_dps_map = declared_dps_path
         .as_ref()
-        .map(|p| load_declared_dps(p))
+        .map(load_declared_dps)
         .transpose()?;
     if declared_dps_map.is_some() {
         tracing::info!("using declared DPS override from file");
