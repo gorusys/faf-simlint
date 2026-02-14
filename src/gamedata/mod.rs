@@ -43,7 +43,11 @@ pub fn extract_gamedata(gamedata_path: &Path, out_dir: &Path) -> Result<usize, S
         }
     }
     // Or maybe direct path to units folder
-    if gamedata_path.file_name().map(|n| n == "units").unwrap_or(false) {
+    if gamedata_path
+        .file_name()
+        .map(|n| n == "units")
+        .unwrap_or(false)
+    {
         collect_and_copy_bps(&gamedata_path, &gamedata_path, out_dir, &mut count)?;
         return Ok(count);
     }

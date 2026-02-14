@@ -12,7 +12,9 @@ fn units_fixture_dir() -> PathBuf {
 
 /// Real FAF dataset copied into the project (units + projectiles).
 fn real_data_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata").join("real")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata")
+        .join("real")
 }
 
 #[test]
@@ -175,7 +177,10 @@ fn real_data_unit_uel0101_has_expected_weapon() {
     assert!(!u.weapons.is_empty(), "UEL0101 has at least one weapon");
     let w = &u.weapons[0];
     assert!((w.damage - 4.0).abs() < 0.01, "UEL0101 weapon damage 4");
-    assert!((w.rate_of_fire - 0.5).abs() < 0.01, "UEL0101 ROF 0.5 (10/20 ticks)");
+    assert!(
+        (w.rate_of_fire - 0.5).abs() < 0.01,
+        "UEL0101 ROF 0.5 (10/20 ticks)"
+    );
     assert_eq!(w.range, 26.0);
 }
 
@@ -197,7 +202,9 @@ fn real_data_unit_uea0103_has_initial_damage() {
         .status()
         .expect("scan");
     let store = faf_simlint::store::Store::open(&out.path().join("scan.sqlite")).expect("open db");
-    let units = store.get_scan_units(store.list_scans().expect("list")[0].0).expect("get units");
+    let units = store
+        .get_scan_units(store.list_scans().expect("list")[0].0)
+        .expect("get units");
     let u = units
         .iter()
         .find(|u| u.unit_id.id.eq_ignore_ascii_case("uea0103"))
@@ -231,7 +238,9 @@ fn real_data_unit_uel0103_has_fragment_projectile() {
         .status()
         .expect("scan");
     let store = faf_simlint::store::Store::open(&out.path().join("scan.sqlite")).expect("open db");
-    let units = store.get_scan_units(store.list_scans().expect("list")[0].0).expect("get units");
+    let units = store
+        .get_scan_units(store.list_scans().expect("list")[0].0)
+        .expect("get units");
     let u = units
         .iter()
         .find(|u| u.unit_id.id.eq_ignore_ascii_case("uel0103"))
@@ -241,7 +250,11 @@ fn real_data_unit_uel0103_has_fragment_projectile() {
         .iter()
         .find(|w| w.fragment_count.is_some())
         .expect("UEL0103 has weapon with fragment count from projectiles");
-    assert_eq!(frag.fragment_count, Some(5), "TIFFragmentationSensorShell01 has 5 fragments");
+    assert_eq!(
+        frag.fragment_count,
+        Some(5),
+        "TIFFragmentationSensorShell01 has 5 fragments"
+    );
 }
 
 #[test]

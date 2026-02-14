@@ -31,7 +31,11 @@ struct Cli {
 enum Commands {
     /// Extract unit blueprints from FAF gamedata folder or gamedata.scd (.zip) into a directory for scanning.
     Extract {
-        #[arg(long, value_name = "PATH", help = "Path to gamedata folder, gamedata.scd, or FAF install root")]
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Path to gamedata folder, gamedata.scd, or FAF install root"
+        )]
         gamedata: PathBuf,
         #[arg(long, value_name = "DIR", default_value = "extracted_units")]
         out: PathBuf,
@@ -42,7 +46,11 @@ enum Commands {
         data_dir: PathBuf,
         #[arg(long, value_name = "DIR", default_value = "out")]
         out: PathBuf,
-        #[arg(long, value_name = "JSON", help = "Optional: JSON file { \"unit_id\": dps } to use as declared DPS instead of blueprint")]
+        #[arg(
+            long,
+            value_name = "JSON",
+            help = "Optional: JSON file { \"unit_id\": dps } to use as declared DPS instead of blueprint"
+        )]
         declared_dps: Option<PathBuf>,
         #[arg(long, default_value_t = DEFAULT_SIMULATION_SECONDS)]
         simulation_seconds: f64,
@@ -71,7 +79,8 @@ enum Commands {
 /// Load declared DPS override from JSON: { "unit_id": dps_number, ... }
 fn load_declared_dps(path: &PathBuf) -> Result<HashMap<String, f64>, String> {
     let s = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let raw: HashMap<String, serde_json::Value> = serde_json::from_str(&s).map_err(|e| e.to_string())?;
+    let raw: HashMap<String, serde_json::Value> =
+        serde_json::from_str(&s).map_err(|e| e.to_string())?;
     let mut out = HashMap::new();
     for (id, v) in raw {
         let dps = match v {
@@ -123,7 +132,9 @@ fn run_extract(gamedata: PathBuf, out: PathBuf) -> Result<(), String> {
 /// Resolve units root and projectiles root: if data_dir is FAF root (has units/ and projectiles/) use those;
 /// if data_dir ends with "units", use it for units and sibling "projectiles" for projectiles.
 fn resolve_scan_dirs(data_dir: &Path) -> (PathBuf, Option<PathBuf>) {
-    let data_dir = data_dir.canonicalize().unwrap_or_else(|_| data_dir.to_path_buf());
+    let data_dir = data_dir
+        .canonicalize()
+        .unwrap_or_else(|_| data_dir.to_path_buf());
     let units_sub = data_dir.join("units");
     let projectiles_sub = data_dir.join("projectiles");
     if units_sub.is_dir() {
@@ -145,10 +156,7 @@ fn resolve_scan_dirs(data_dir: &Path) -> (PathBuf, Option<PathBuf>) {
     (data_dir, None)
 }
 
-fn collect_projectile_files(
-    dir: &Path,
-    out: &mut Vec<PathBuf>,
-) -> Result<(), String> {
+fn collect_projectile_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     if out.len() >= MAX_BLUEPRINT_FILES {
         return Ok(());
     }
@@ -204,7 +212,10 @@ fn run_scan(cfg: ScanConfig, declared_dps_path: Option<PathBuf>) -> Result<(), S
     if let Some(ref proj_dir) = projectiles_root {
         let mut proj_files = Vec::new();
         collect_projectile_files(proj_dir, &mut proj_files)?;
-        tracing::info!("loaded {} projectile blueprint(s) for fragment data", proj_files.len());
+        tracing::info!(
+            "loaded {} projectile blueprint(s) for fragment data",
+            proj_files.len()
+        );
         for path in &proj_files {
             let content = match fs::read_to_string(path) {
                 Ok(c) => c,
@@ -340,7 +351,11 @@ fn run_unit(
                 }
             }
         }
-        let projectile_map_ref = if projectile_map.is_empty() { None } else { Some(&projectile_map) };
+        let projectile_map_ref = if projectile_map.is_empty() {
+            None
+        } else {
+            Some(&projectile_map)
+        };
         for path in &lua_files {
             let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
             if let Some(summary) = unit_summary_from_file(

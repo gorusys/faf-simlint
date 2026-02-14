@@ -20,7 +20,9 @@ pub fn parse_blueprint(content: &str) -> Result<LuaValue, ParseError> {
             0
         } else {
             let prefix = trimmed.get(..open).unwrap_or("").trim_end();
-            if prefix.ends_with("Blueprint") && prefix.chars().all(|c| c.is_ascii_alphabetic() || c == '_') {
+            if prefix.ends_with("Blueprint")
+                && prefix.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
+            {
                 open
             } else {
                 0
@@ -29,7 +31,11 @@ pub fn parse_blueprint(content: &str) -> Result<LuaValue, ParseError> {
     } else {
         0
     };
-    let slice = if start > 0 { &trimmed[start..] } else { trimmed };
+    let slice = if start > 0 {
+        &trimmed[start..]
+    } else {
+        trimmed
+    };
     let mut p = Parser::new(slice);
     p.parse_value().and_then(|v| {
         p.skip_whitespace_and_comments();

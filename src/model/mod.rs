@@ -89,10 +89,7 @@ pub struct UnitSummary {
 /// Total damage per shot: weapon Damage + InitialDamage + (fragment_count * fragment_damage). Weapon blueprint damage does not include fragments or DoT.
 pub fn total_damage_per_shot(w: &WeaponDeclared) -> f64 {
     let base = w.damage + w.initial_damage.unwrap_or(0.0);
-    let frag = w
-        .fragment_count
-        .unwrap_or(0) as f64
-        * w.fragment_damage.unwrap_or(0.0);
+    let frag = w.fragment_count.unwrap_or(0) as f64 * w.fragment_damage.unwrap_or(0.0);
     base + frag
 }
 

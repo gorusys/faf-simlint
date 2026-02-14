@@ -18,7 +18,9 @@ pub fn enrich_weapons_from_projectiles(
     map: &HashMap<String, ProjectileData>,
 ) {
     for w in weapons.iter_mut() {
-        let Some(ref proj_id) = w.projectile_id else { continue };
+        let Some(ref proj_id) = w.projectile_id else {
+            continue;
+        };
         let key = normalize_projectile_path(proj_id);
         let Some(proj) = map.get(&key) else { continue };
         if let Some(n) = proj.fragment_count {
@@ -51,7 +53,10 @@ pub fn weapon_from_lua(table: &LuaValue) -> Option<WeaponDeclared> {
     let rack_reload = table.get_num("RackSalvoReloadTime");
     let muzzle_salvo_size = table.get_num("MuzzleSalvoSize").map(|n| n as u32);
     let muzzle_salvo_delay = table.get_num("MuzzleSalvoDelay");
-    let salvo_size = table.get_num("SalvoSize").map(|n| n as u32).or(muzzle_salvo_size);
+    let salvo_size = table
+        .get_num("SalvoSize")
+        .map(|n| n as u32)
+        .or(muzzle_salvo_size);
     let salvo_delay = table.get_num("SalvoDelay").or(muzzle_salvo_delay);
     let reload = table.get_num("ReloadTime").or(rack_reload);
     let muzzle = table.get_num("MuzzleVelocity");
@@ -63,10 +68,7 @@ pub fn weapon_from_lua(table: &LuaValue) -> Option<WeaponDeclared> {
         .unwrap_or("unknown")
         .to_string();
     let projectiles = table.get_num("ProjectilesPerOnFire").map(|n| n as u32);
-    let projectiles_per_fire = projectiles
-        .or(muzzle_salvo_size)
-        .unwrap_or(1)
-        .max(1);
+    let projectiles_per_fire = projectiles.or(muzzle_salvo_size).unwrap_or(1).max(1);
     Some(WeaponDeclared {
         weapon_bp_id,
         damage,
@@ -201,9 +203,7 @@ pub fn build_unit_summary(
             target_class_modifiers,
         });
 
-        if declared_dps_override.is_none()
-            && (nominal - eff_dps).abs() > 0.01 * nominal.max(1.0)
-        {
+        if declared_dps_override.is_none() && (nominal - eff_dps).abs() > 0.01 * nominal.max(1.0) {
             anomalies.push(Anomaly::declared_vs_effective_mismatch(
                 &unit_id.id,
                 &w.weapon_bp_id,
@@ -292,10 +292,7 @@ pub fn unit_summary_from_file(
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let id = id
-                .strip_suffix("_unit")
-                .unwrap_or(&id)
-                .to_string();
+            let id = id.strip_suffix("_unit").unwrap_or(&id).to_string();
             UnitId {
                 id: id.clone(),
                 name: None,
@@ -309,8 +306,8 @@ pub fn unit_summary_from_file(
     if let Some(map) = projectile_map {
         enrich_weapons_from_projectiles(&mut weapons, map);
     }
-    let declared_override = declared_dps_overrides
-        .and_then(|m| m.get(&unit_id.id.to_lowercase()).copied());
+    let declared_override =
+        declared_dps_overrides.and_then(|m| m.get(&unit_id.id.to_lowercase()).copied());
     let blueprint_path = path.to_string_lossy().to_string();
     Ok(Some(build_unit_summary(
         unit_id,
